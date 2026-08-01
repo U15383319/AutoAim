@@ -37,14 +37,17 @@ public final class AutoAimConfig {
             "minecraft:fishing_bobber"
     );
 
+    private static volatile boolean markerEnabled;
     private static volatile int glowColor = DEFAULT_GLOW_COLOR_RGB;
     private static volatile Set<ResourceLocation> entityBlacklist = Set.of();
+    private static Path configPath;
+    private static ConfigData configData = new ConfigData();
 
     private AutoAimConfig() {
     }
 
-    public static void load() {
-        Path configPath = Platform.getConfigFolder().resolve("autoaim.json");
+    public static synchronized void load() {
+        configPath = Platform.getConfigFolder().resolve("autoaim.json");
         ConfigData data = new ConfigData();
 
         if (Files.exists(configPath)) {
@@ -57,23 +60,32 @@ public final class AutoAimConfig {
                 AutoAim.LOGGER.error("Unable to read {}; using defaults", configPath, exception);
             }
         } else {
-            try {
-                Files.createDirectories(configPath.getParent());
-                try (Writer writer = Files.newBufferedWriter(configPath, StandardCharsets.UTF_8)) {
-                    GSON.toJson(data, writer);
-                }
-            } catch (IOException exception) {
-                AutoAim.LOGGER.error("Unable to create default config at {}", configPath, exception);
-            }
+            writeConfig(configPath, data);
         }
 
+        configData = data;
+        markerEnabled = data.markerEnabled;
         glowColor = parseColor(data.glowColor);
         entityBlacklist = parseBlacklist(data.entityBlacklist);
         AutoAim.LOGGER.info(
-                "Loaded Auto Aim config: glowColor=#{}, {} blacklisted entity types",
+                "Loaded Auto Aim config: markerEnabled={}, glowColor=#{}, {} blacklisted entity types",
+                markerEnabled,
                 String.format("%06X", glowColor),
                 entityBlacklist.size()
         );
+    }
+
+    public static boolean markerEnabled() {
+        return markerEnabled;
+    }
+
+    public static synchronized void setMarkerEnabled(boolean enabled) {
+        markerEnabled = enabled;
+        configData.markerEnabled = enabled;
+        Path targetPath = configPath != null
+                ? configPath
+                : Platform.getConfigFolder().resolve("autoaim.json");
+        writeConfig(targetPath, configData);
     }
 
     public static int glowColor() {
@@ -83,6 +95,17 @@ public final class AutoAimConfig {
     public static boolean isBlacklisted(Entity entity) {
         ResourceLocation entityTypeId = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
         return entityBlacklist.contains(entityTypeId);
+    }
+
+    private static void writeConfig(Path path, ConfigData data) {
+        try {
+            Files.createDirectories(path.getParent());
+            try (Writer writer = Files.newBufferedWriter(path, StandardCharsets.UTF_8)) {
+                GSON.toJson(data, writer);
+            }
+        } catch (IOException exception) {
+            AutoAim.LOGGER.error("Unable to write Auto Aim config at {}", path, exception);
+        }
     }
 
     private static int parseColor(String configuredColor) {
@@ -125,6 +148,7 @@ public final class AutoAimConfig {
     }
 
     private static final class ConfigData {
+        private boolean markerEnabled;
         private String glowColor = DEFAULT_GLOW_COLOR;
         private List<String> entityBlacklist = new ArrayList<>(DEFAULT_BLACKLIST);
     }

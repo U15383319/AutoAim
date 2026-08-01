@@ -9,8 +9,9 @@ Minecraft 1.20.1 client mod built with Architectury API for Fabric and Forge.
   trajectory receives a pulsing overlay. A fully loaded crossbow also keeps the
   marker visible while merely held. Ender pearls, snowballs, eggs, splash potions,
   and lingering potions always show their trajectory while held, without requiring
-  item use. If an entity would be hit first, the block marker is hidden and that
-  entity receives a vanilla glowing outline.
+  item use. A Riptide trident shows its level-dependent dash path once fully charged
+  in water or rain. If an entity would be hit first, the block marker is hidden and
+  that entity receives a vanilla glowing outline.
 - Hold **V** with a supported ranged weapon or throwable item to acquire a hittable
   entity near the complete three-dimensional projectile trajectory. Targets closer
   to the path are preferred, with targets beside earlier portions of the path
@@ -29,6 +30,7 @@ On first launch the mod creates `config/autoaim.json`:
 
 ```json
 {
+  "markerEnabled": false,
   "glowColor": "#FF7A0D",
   "entityBlacklist": [
     "minecraft:item",
@@ -43,7 +45,9 @@ On first launch the mod creates `config/autoaim.json`:
 }
 ```
 
-`glowColor` accepts `#RRGGBB`, `RRGGBB`, or `0xRRGGBB`. Entries in
+`markerEnabled` is updated whenever the marker key is toggled, so the mode is
+restored after restarting the client. `glowColor` accepts `#RRGGBB`, `RRGGBB`,
+or `0xRRGGBB`. Entries in
 `entityBlacklist` are entity type registry IDs and affect auto-aim acquisition
 only; an actually obstructing entity is still shown by the impact marker. Restart
 the client after editing the file.

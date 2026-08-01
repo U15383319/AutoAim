@@ -48,6 +48,7 @@ public final class AutoAimClient {
 
     public static void init() {
         AutoAimConfig.load();
+        markerEnabled = AutoAimConfig.markerEnabled();
         KeyMappingRegistry.register(TOGGLE_MARKER);
         KeyMappingRegistry.register(HOLD_AUTO_AIM);
         ClientTickEvent.CLIENT_POST.register(AutoAimClient::onClientTick);
@@ -64,6 +65,7 @@ public final class AutoAimClient {
     private static void onClientTick(Minecraft minecraft) {
         while (TOGGLE_MARKER.consumeClick()) {
             markerEnabled = !markerEnabled;
+            AutoAimConfig.setMarkerEnabled(markerEnabled);
             if (!markerEnabled) {
                 clearMarker();
             }
