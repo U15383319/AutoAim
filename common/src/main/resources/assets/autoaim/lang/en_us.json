@@ -1,0 +1,7 @@
+{
+  "key.categories.autoaim": "Auto Aim",
+  "key.autoaim.toggle_marker": "Toggle impact marker",
+  "key.autoaim.hold_auto_aim": "Hold for auto aim",
+  "message.autoaim.marker_enabled": "Impact marker enabled",
+  "message.autoaim.marker_disabled": "Impact marker disabled"
+}

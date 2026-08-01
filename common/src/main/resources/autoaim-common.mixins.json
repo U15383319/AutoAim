@@ -1,0 +1,14 @@
+{
+  "required": true,
+  "package": "dev.cosmos.autoaim.mixin.client",
+  "compatibilityLevel": "JAVA_17",
+  "minVersion": "0.8",
+  "client": [
+    "EntityMixin",
+    "MinecraftMixin",
+    "LevelRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

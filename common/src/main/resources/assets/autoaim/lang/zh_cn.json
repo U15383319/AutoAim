@@ -1,0 +1,7 @@
+{
+  "key.categories.autoaim": "自动瞄准",
+  "key.autoaim.toggle_marker": "切换命中标记",
+  "key.autoaim.hold_auto_aim": "按住自动瞄准",
+  "message.autoaim.marker_enabled": "已开启命中标记",
+  "message.autoaim.marker_disabled": "已关闭命中标记"
+}
