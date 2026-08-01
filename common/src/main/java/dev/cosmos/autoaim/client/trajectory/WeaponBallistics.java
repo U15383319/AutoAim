@@ -22,6 +22,11 @@ public final class WeaponBallistics {
     private static final BallisticProfile CROSSBOW_ARROW = new BallisticProfile(3.15D, 0.05D, 0.99D, 0.6D, false);
     private static final BallisticProfile FIREWORK = new BallisticProfile(1.6D, 0.0D, 1.0D, 1.0D, false);
     private static final BallisticProfile TRIDENT = new BallisticProfile(2.5D, 0.05D, 0.99D, 0.99D, true);
+    // Riptide moves the player rather than spawning a projectile. These values
+    // model the vanilla impulse and subsequent air movement in the shared path solver.
+    private static final double RIPTIDE_AIR_DRAG = 0.91D;
+    private static final double RIPTIDE_WATER_DRAG = 0.8D;
+    private static final double RIPTIDE_GRAVITY = 0.0784D;
     private static final BallisticProfile FAST_THROWABLE = new BallisticProfile(1.5D, 0.03D, 0.99D, 0.8D, true);
     private static final BallisticProfile THROWABLE_POTION =
             new BallisticProfile(0.5D, 0.05D, 0.99D, 0.8D, true, -20.0F);
@@ -123,8 +128,15 @@ public final class WeaponBallistics {
         }
 
         if (item instanceof TridentItem) {
-            if (EnchantmentHelper.getRiptide(stack) > 0 || (activelyUsing && player.getTicksUsingItem() < 10)) {
+            int riptideLevel = EnchantmentHelper.getRiptide(stack);
+            if (activelyUsing && player.getTicksUsingItem() < 10) {
                 return Optional.empty();
+            }
+            if (riptideLevel > 0) {
+                if (!activelyUsing || !player.isInWaterOrRain()) {
+                    return Optional.empty();
+                }
+                return Optional.of(new WeaponContext(stack, hand, riptideProfile(riptideLevel)));
             }
             return Optional.of(new WeaponContext(stack, hand, TRIDENT));
         }
@@ -173,5 +185,16 @@ public final class WeaponBallistics {
 
     private static boolean hasProjectile(LocalPlayer player, ItemStack weapon) {
         return player.getAbilities().instabuild || !player.getProjectile(weapon).isEmpty();
+    }
+
+    private static BallisticProfile riptideProfile(int riptideLevel) {
+        double impulse = 3.0D * (1.0D + riptideLevel) / 4.0D;
+        return new BallisticProfile(
+                impulse,
+                RIPTIDE_GRAVITY,
+                RIPTIDE_AIR_DRAG,
+                RIPTIDE_WATER_DRAG,
+                true
+        );
     }
 }
