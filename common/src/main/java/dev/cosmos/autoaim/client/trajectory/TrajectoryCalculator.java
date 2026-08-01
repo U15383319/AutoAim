@@ -8,6 +8,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.FluidTags;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.AABB;
@@ -211,9 +212,27 @@ public final class TrajectoryCalculator {
             float pitch,
             float yaw
     ) {
-        return Vec3.directionFromRotation(pitch, yaw)
+        return launchDirection(profile, pitch, yaw)
                 .scale(profile.speed())
                 .add(inheritedMovement(shooter, profile));
+    }
+
+    private static Vec3 launchDirection(BallisticProfile profile, float pitch, float yaw) {
+        float verticalOffset = profile.verticalLaunchAngleOffsetDegrees();
+        if (Math.abs(verticalOffset) < EPSILON) {
+            return Vec3.directionFromRotation(pitch, yaw);
+        }
+
+        // Projectile#shootFromRotation applies its angle offset only to the
+        // vertical component before normalizing the complete direction vector.
+        float pitchRadians = pitch * Mth.DEG_TO_RAD;
+        float yawRadians = yaw * Mth.DEG_TO_RAD;
+        double horizontalScale = Mth.cos(pitchRadians);
+        return new Vec3(
+                -Mth.sin(yawRadians) * horizontalScale,
+                -Mth.sin((pitch + verticalOffset) * Mth.DEG_TO_RAD),
+                Mth.cos(yawRadians) * horizontalScale
+        ).normalize();
     }
 
     public static BlockHitResult clipBlocks(

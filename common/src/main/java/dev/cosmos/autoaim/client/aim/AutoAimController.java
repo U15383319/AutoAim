@@ -36,12 +36,12 @@ public final class AutoAimController {
             return;
         }
 
-        Optional<WeaponContext> weapon = WeaponBallistics.findHeldWeapon(player, false);
+        Optional<WeaponContext> weapon = WeaponBallistics.findAutoAimWeapon(player);
         if (weapon.isEmpty()) {
             // A bow's first few draw ticks and a trident's pre-throw wind-up do not
             // yet have a usable trajectory. Keep an existing lock so it can resume
             // as soon as the charge becomes valid.
-            if (player.isUsingItem() && WeaponBallistics.isRangedWeapon(player.getUseItem())) {
+            if (player.isUsingItem() && WeaponBallistics.isSupportedProjectileItem(player.getUseItem())) {
                 return;
             }
             clearTarget();

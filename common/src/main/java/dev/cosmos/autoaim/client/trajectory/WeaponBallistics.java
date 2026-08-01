@@ -10,6 +10,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.ProjectileWeaponItem;
+import net.minecraft.world.item.ThrowablePotionItem;
 import net.minecraft.world.item.TridentItem;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 
@@ -21,51 +22,88 @@ public final class WeaponBallistics {
     private static final BallisticProfile CROSSBOW_ARROW = new BallisticProfile(3.15D, 0.05D, 0.99D, 0.6D, false);
     private static final BallisticProfile FIREWORK = new BallisticProfile(1.6D, 0.0D, 1.0D, 1.0D, false);
     private static final BallisticProfile TRIDENT = new BallisticProfile(2.5D, 0.05D, 0.99D, 0.99D, true);
+    private static final BallisticProfile FAST_THROWABLE = new BallisticProfile(1.5D, 0.03D, 0.99D, 0.8D, true);
+    private static final BallisticProfile THROWABLE_POTION =
+            new BallisticProfile(0.5D, 0.05D, 0.99D, 0.8D, true, -20.0F);
 
     private WeaponBallistics() {
     }
 
-    /**
-     * Finds the weapon whose trajectory should currently be used. Active item use wins,
-     * followed by the main hand and then the offhand.
-     */
-    public static Optional<WeaponContext> findHeldWeapon(LocalPlayer player, boolean requireCharging) {
-        if (player.isUsingItem() && isRangedWeapon(player.getUseItem())) {
+    public static Optional<WeaponContext> findMarkerWeapon(LocalPlayer player) {
+        return findHeldWeapon(player, true);
+    }
+
+    public static Optional<WeaponContext> findAutoAimWeapon(LocalPlayer player) {
+        return findHeldWeapon(player, false);
+    }
+
+    private static Optional<WeaponContext> findHeldWeapon(LocalPlayer player, boolean markerMode) {
+        if (player.isUsingItem() && isSupportedProjectileItem(player.getUseItem())) {
             return createContext(player, player.getUseItem(), player.getUsedItemHand(), true);
         }
 
         ItemStack mainHand = player.getMainHandItem();
-        if (requireCharging && isChargedCrossbow(mainHand)) {
+        if (markerMode && canShowMarkerWhileHeld(mainHand)) {
             return createContext(player, mainHand, InteractionHand.MAIN_HAND, false);
         }
 
         ItemStack offhand = player.getOffhandItem();
-        if (requireCharging && isChargedCrossbow(offhand)) {
+        if (markerMode && canShowMarkerWhileHeld(offhand)) {
             return createContext(player, offhand, InteractionHand.OFF_HAND, false);
         }
 
-        if (requireCharging) {
+        if (markerMode) {
             return Optional.empty();
         }
 
-        if (isRangedWeapon(mainHand)) {
-            return createContext(player, mainHand, InteractionHand.MAIN_HAND, false);
+        if (isSupportedProjectileItem(mainHand)) {
+            Optional<WeaponContext> mainHandContext = createContext(
+                    player,
+                    mainHand,
+                    InteractionHand.MAIN_HAND,
+                    false
+            );
+            if (mainHandContext.isPresent()) {
+                return mainHandContext;
+            }
         }
 
-        if (isRangedWeapon(offhand)) {
+        if (isSupportedProjectileItem(offhand)) {
             return createContext(player, offhand, InteractionHand.OFF_HAND, false);
         }
 
         return Optional.empty();
     }
 
-    public static boolean isRangedWeapon(ItemStack stack) {
+    public static boolean isSupportedProjectileItem(ItemStack stack) {
+        return isRangedWeapon(stack) || isThrowableItem(stack);
+    }
+
+    private static boolean isRangedWeapon(ItemStack stack) {
         Item item = stack.getItem();
         return item instanceof ProjectileWeaponItem || item instanceof TridentItem;
     }
 
+    private static boolean canShowMarkerWhileHeld(ItemStack stack) {
+        return isChargedCrossbow(stack) || isThrowableItem(stack);
+    }
+
     private static boolean isChargedCrossbow(ItemStack stack) {
         return stack.getItem() instanceof CrossbowItem && CrossbowItem.isCharged(stack);
+    }
+
+    private static boolean isThrowableItem(ItemStack stack) {
+        return isFastThrowable(stack) || isThrowablePotion(stack);
+    }
+
+    private static boolean isFastThrowable(ItemStack stack) {
+        return stack.is(Items.ENDER_PEARL)
+                || stack.is(Items.SNOWBALL)
+                || stack.is(Items.EGG);
+    }
+
+    private static boolean isThrowablePotion(ItemStack stack) {
+        return stack.getItem() instanceof ThrowablePotionItem;
     }
 
     private static Optional<WeaponContext> createContext(
@@ -75,6 +113,14 @@ public final class WeaponBallistics {
             boolean activelyUsing
     ) {
         Item item = stack.getItem();
+
+        if (isFastThrowable(stack)) {
+            return Optional.of(new WeaponContext(stack, hand, FAST_THROWABLE));
+        }
+
+        if (isThrowablePotion(stack)) {
+            return Optional.of(new WeaponContext(stack, hand, THROWABLE_POTION));
+        }
 
         if (item instanceof TridentItem) {
             if (EnchantmentHelper.getRiptide(stack) > 0 || (activelyUsing && player.getTicksUsingItem() < 10)) {

@@ -7,13 +7,16 @@ Minecraft 1.20.1 client mod built with Architectury API for Fabric and Forge.
 - **G** toggles the projectile impact marker. While a bow, crossbow, trident,
   or compatible `ProjectileWeaponItem` is being charged, the first block on the
   trajectory receives a pulsing overlay. A fully loaded crossbow also keeps the
-  marker visible while merely held. If an entity would be hit first, the block
-  marker is hidden and that entity receives a vanilla glowing outline.
-- Hold **V** to acquire a hittable entity near the complete three-dimensional
-  projectile trajectory. Targets closer to the path are preferred, with targets
-  beside earlier portions of the path winning within the same 0.5-block distance
-  band. While the marker is enabled, the locked target receives the configured
-  glowing outline. Releasing **V** releases the target immediately.
+  marker visible while merely held. Ender pearls, snowballs, eggs, splash potions,
+  and lingering potions always show their trajectory while held, without requiring
+  item use. If an entity would be hit first, the block marker is hidden and that
+  entity receives a vanilla glowing outline.
+- Hold **V** with a supported ranged weapon or throwable item to acquire a hittable
+  entity near the complete three-dimensional projectile trajectory. Targets closer
+  to the path are preferred, with targets beside earlier portions of the path
+  winning within the same 0.5-block distance band. While the marker is enabled,
+  the locked target receives the configured glowing outline. Releasing **V**
+  releases the target immediately.
 
 Both keys can be changed in Minecraft's Controls screen. The acquisition tube is
 limited to 12 blocks around the trajectory, and trajectories are limited to 128

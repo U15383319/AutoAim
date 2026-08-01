@@ -95,7 +95,7 @@ public final class AutoAimClient {
             return;
         }
 
-        Optional<WeaponContext> weapon = WeaponBallistics.findHeldWeapon(player, true);
+        Optional<WeaponContext> weapon = WeaponBallistics.findMarkerWeapon(player);
         if (weapon.isEmpty()) {
             clearMarker();
             return;
