@@ -237,11 +237,24 @@ public final class BallisticAimSolver {
         }
 
         float yaw = (float) Math.toDegrees(Math.atan2(-ownVelocity.x, ownVelocity.z));
-        float pitch = (float) Math.toDegrees(Math.atan2(-ownVelocity.y, horizontalSpeed));
+        float projectilePitch = (float) Math.toDegrees(Math.atan2(-ownVelocity.y, horizontalSpeed));
+        float pitch = playerPitchFor(profile, projectilePitch);
         if (!Float.isFinite(yaw) || !Float.isFinite(pitch) || Math.abs(pitch) >= 90.0F) {
             return null;
         }
         return new KinematicSolution(yaw, pitch, flightTicks);
+    }
+
+    private static float playerPitchFor(BallisticProfile profile, float projectilePitch) {
+        double offset = Math.toRadians(profile.verticalLaunchAngleOffsetDegrees());
+        if (Math.abs(offset) < EPSILON) {
+            return projectilePitch;
+        }
+
+        double projectilePitchRadians = Math.toRadians(projectilePitch);
+        double playerPitchTangent = (Math.tan(projectilePitchRadians) - Math.sin(offset))
+                / Math.cos(offset);
+        return (float) Math.toDegrees(Math.atan(playerPitchTangent));
     }
 
     private static Vec3 calculateLead(Entity target, double flightTicks) {
