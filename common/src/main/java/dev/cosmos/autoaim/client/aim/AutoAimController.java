@@ -27,8 +27,11 @@ public final class AutoAimController {
     private static final double EPSILON = 1.0E-7D;
 
     private Entity lockedTarget;
+    private LocalPlayer aimingPlayer;
+    private AimSolution aimSolution;
 
     public void tick(Minecraft minecraft, boolean aimKeyHeld) {
+        aimSolution = null;
         LocalPlayer player = minecraft.player;
         ClientLevel level = minecraft.level;
         if (!aimKeyHeld || minecraft.screen != null || player == null || level == null || player.isSpectator()) {
@@ -63,27 +66,33 @@ public final class AutoAimController {
             return;
         }
 
-        Optional<AimSolution> solution = BallisticAimSolver.solve(
+        aimingPlayer = player;
+        aimSolution = BallisticAimSolver.solve(
                 level,
                 player,
                 lockedTarget,
                 context.ballistics()
-        );
-        if (solution.isEmpty()) {
-            return;
-        }
-
-        AimSolution aim = solution.get();
-        player.setYRot(aim.yaw());
-        player.setXRot(aim.pitch());
+        ).orElse(null);
     }
 
     public void clearTarget() {
         lockedTarget = null;
+        aimingPlayer = null;
+        aimSolution = null;
     }
 
     public Optional<Entity> lockedTarget() {
         return Optional.ofNullable(lockedTarget);
+    }
+
+    public Optional<AimSolution> aimSolution(LocalPlayer player) {
+        if (player != aimingPlayer
+                || aimSolution == null
+                || !isValidTarget(player, lockedTarget)
+                || WeaponBallistics.findAutoAimWeapon(player).isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(aimSolution);
     }
 
     private static Optional<Entity> findTrajectoryTarget(

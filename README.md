@@ -25,6 +25,12 @@ Minecraft 1.20.1 client mod built with Architectury API for Fabric and Forge.
   its bounding-box center. A melee-locked entity glows only after it is actually
   within vanilla attack reach and is not blocked by a block or another entity.
 
+While a valid lock is active, the view follows the target smoothly each rendered
+frame, with a capped turn speed and frame-rate-independent damping. Mouse look is
+temporarily suppressed during that lock to prevent it from fighting the aim.
+Releasing **V**, losing a valid aim solution, or opening a screen restores normal
+mouse look.
+
 Both keys can be changed in Minecraft's Controls screen. The acquisition tube is
 limited to 12 blocks around the trajectory, and trajectories are limited to 128
 blocks. All projectile-collidable entity types are eligible, including airborne
