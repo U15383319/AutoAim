@@ -4,20 +4,26 @@ Minecraft 1.20.1 client mod built with Architectury API for Fabric and Forge.
 
 ## Controls
 
-- **G** toggles the projectile impact marker. While a bow, crossbow, trident,
-  or compatible `ProjectileWeaponItem` is being charged, the first block on the
+- **G** toggles the impact/attack marker. While a bow, crossbow, trident, or
+  compatible `ProjectileWeaponItem` is being charged, the first block on the
   trajectory receives a pulsing overlay. A fully loaded crossbow also keeps the
   marker visible while merely held. Ender pearls, snowballs, eggs, splash potions,
   and lingering potions always show their trajectory while held, without requiring
   item use. A Riptide trident shows its level-dependent dash path once fully charged
   in water or rain. If an entity would be hit first, the block marker is hidden and
-  that entity receives a vanilla glowing outline.
+  that entity receives a vanilla glowing outline. When a sword, axe, or idle
+  trident is selected as the held combat item, the entity under the crosshair
+  glows only when Minecraft's own reach and obstruction checks say a normal
+  attack can hit it.
 - Hold **V** with a supported ranged weapon or throwable item to acquire a hittable
   entity near the complete three-dimensional projectile trajectory. Targets closer
   to the path are preferred, with targets beside earlier portions of the path
   winning within the same 0.5-block distance band. While the marker is enabled,
   the locked target receives the configured glowing outline. Releasing **V**
-  releases the target immediately.
+  releases the target immediately. With a held melee weapon, **V** instead
+  locks the nearest eligible entity within 12 blocks and turns the crosshair toward
+  its bounding-box center. A melee-locked entity glows only after it is actually
+  within vanilla attack reach and is not blocked by a block or another entity.
 
 Both keys can be changed in Minecraft's Controls screen. The acquisition tube is
 limited to 12 blocks around the trajectory, and trajectories are limited to 128
@@ -48,9 +54,9 @@ On first launch the mod creates `config/autoaim.json`:
 `markerEnabled` is updated whenever the marker key is toggled, so the mode is
 restored after restarting the client. `glowColor` accepts `#RRGGBB`, `RRGGBB`,
 or `0xRRGGBB`. Entries in
-`entityBlacklist` are entity type registry IDs and affect auto-aim acquisition
-only; an actually obstructing entity is still shown by the impact marker. Restart
-the client after editing the file.
+`entityBlacklist` are entity type registry IDs and affect projectile and melee
+auto-aim acquisition only; an actually obstructing entity is still shown by the
+impact marker. Restart the client after editing the file.
 
 ## Building
 
