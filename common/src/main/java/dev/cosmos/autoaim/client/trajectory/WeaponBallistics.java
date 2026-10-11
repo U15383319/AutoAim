@@ -128,6 +128,12 @@ public final class WeaponBallistics {
         }
 
         if (item instanceof TridentItem) {
+            // An idle trident is a melee weapon. It only enters ballistic mode
+            // after the player has started its use/charge action.
+            if (!activelyUsing) {
+                return Optional.empty();
+            }
+
             int riptideLevel = EnchantmentHelper.getRiptide(stack);
             if (activelyUsing && player.getTicksUsingItem() < 10) {
                 return Optional.empty();

@@ -4,7 +4,9 @@ import com.mojang.blaze3d.platform.InputConstants;
 import dev.architectury.event.events.client.ClientTickEvent;
 import dev.architectury.registry.client.keymappings.KeyMappingRegistry;
 import dev.cosmos.autoaim.client.aim.AutoAimController;
+import dev.cosmos.autoaim.client.aim.MeleeAimController;
 import dev.cosmos.autoaim.client.config.AutoAimConfig;
+import dev.cosmos.autoaim.client.melee.MeleeCombat;
 import dev.cosmos.autoaim.client.trajectory.TrajectoryCalculator;
 import dev.cosmos.autoaim.client.trajectory.TrajectoryResult;
 import dev.cosmos.autoaim.client.trajectory.WeaponBallistics;
@@ -37,7 +39,8 @@ public final class AutoAimClient {
             GLFW.GLFW_KEY_V,
             KEY_CATEGORY
     );
-    private static final AutoAimController AIM_CONTROLLER = new AutoAimController();
+    private static final AutoAimController PROJECTILE_AIM_CONTROLLER = new AutoAimController();
+    private static final MeleeAimController MELEE_AIM_CONTROLLER = new MeleeAimController();
 
     private static boolean markerEnabled;
     private static Optional<BlockPos> markedBlock = Optional.empty();
@@ -79,18 +82,30 @@ public final class AutoAimClient {
             }
         }
 
-        AIM_CONTROLLER.tick(minecraft, HOLD_AUTO_AIM.isDown());
-        updateMarker(minecraft);
+        boolean meleeMode = MeleeCombat.isActive(minecraft.player);
+        if (meleeMode) {
+            PROJECTILE_AIM_CONTROLLER.clearTarget();
+            MELEE_AIM_CONTROLLER.tick(minecraft, HOLD_AUTO_AIM.isDown());
+        } else {
+            MELEE_AIM_CONTROLLER.clearTarget();
+            PROJECTILE_AIM_CONTROLLER.tick(minecraft, HOLD_AUTO_AIM.isDown());
+        }
+        updateMarker(minecraft, meleeMode);
     }
 
-    private static void updateMarker(Minecraft minecraft) {
+    private static void updateMarker(Minecraft minecraft, boolean meleeMode) {
         LocalPlayer player = minecraft.player;
         if (!markerEnabled || player == null || minecraft.level == null) {
             clearMarker();
             return;
         }
 
-        Optional<Entity> lockedTarget = AIM_CONTROLLER.lockedTarget();
+        if (meleeMode) {
+            updateMeleeMarker(minecraft);
+            return;
+        }
+
+        Optional<Entity> lockedTarget = PROJECTILE_AIM_CONTROLLER.lockedTarget();
         if (lockedTarget.isPresent()) {
             markedEntity = glowEntityFor(lockedTarget.get());
             markedBlock = Optional.empty();
@@ -116,6 +131,24 @@ public final class AutoAimClient {
         markedBlock = markedEntity == null
                 ? trajectory.blockHit().map(hit -> hit.getBlockPos().immutable())
                 : Optional.empty();
+    }
+
+    private static void updateMeleeMarker(Minecraft minecraft) {
+        Optional<Entity> attackableTarget = MeleeCombat.pickAttackableEntity(minecraft);
+        Optional<Entity> lockedTarget = MELEE_AIM_CONTROLLER.lockedTarget();
+
+        if (lockedTarget.isPresent()) {
+            Entity locked = lockedTarget.get();
+            markedEntity = attackableTarget
+                    .filter(hit -> MeleeCombat.isSameTarget(hit, locked))
+                    .map(hit -> glowEntityFor(locked))
+                    .orElse(null);
+            markedBlock = Optional.empty();
+            return;
+        }
+
+        markedEntity = attackableTarget.map(AutoAimClient::glowEntityFor).orElse(null);
+        markedBlock = Optional.empty();
     }
 
     private static Entity glowEntityFor(Entity collisionEntity) {
