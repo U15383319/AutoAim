@@ -24,8 +24,11 @@ import java.util.Optional;
 @Environment(EnvType.CLIENT)
 public final class MeleeAimController {
     private Entity lockedTarget;
+    private LocalPlayer aimingPlayer;
+    private AimSolution aimSolution;
 
     public void tick(Minecraft minecraft, boolean autoAimHeld) {
+        aimSolution = null;
         LocalPlayer player = minecraft.player;
         ClientLevel level = minecraft.level;
         if (!autoAimHeld
@@ -42,7 +45,8 @@ public final class MeleeAimController {
         }
 
         if (lockedTarget != null) {
-            aimAt(player, lockedTarget);
+            aimingPlayer = player;
+            aimSolution = aimAt(player, lockedTarget);
         }
     }
 
@@ -52,6 +56,15 @@ public final class MeleeAimController {
 
     public void clearTarget() {
         lockedTarget = null;
+        aimingPlayer = null;
+        aimSolution = null;
+    }
+
+    public Optional<AimSolution> aimSolution(LocalPlayer player) {
+        if (player != aimingPlayer || !isValidTarget(player, lockedTarget)) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(aimSolution);
     }
 
     private static Optional<Entity> findNearestTarget(ClientLevel level, LocalPlayer player) {
@@ -78,17 +91,16 @@ public final class MeleeAimController {
         return distanceToBoxSquared(player.getEyePosition(), entity.getBoundingBox()) <= range * range;
     }
 
-    private static void aimAt(LocalPlayer player, Entity target) {
+    private static AimSolution aimAt(LocalPlayer player, Entity target) {
         Vec3 delta = target.getBoundingBox().getCenter().subtract(player.getEyePosition());
         double horizontalDistance = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
         if (horizontalDistance < 1.0E-6D && Math.abs(delta.y) < 1.0E-6D) {
-            return;
+            return null;
         }
 
         float yaw = (float) (Math.toDegrees(Math.atan2(delta.z, delta.x)) - 90.0D);
         float pitch = (float) -Math.toDegrees(Math.atan2(delta.y, horizontalDistance));
-        player.setYRot(Mth.wrapDegrees(yaw));
-        player.setXRot(Mth.clamp(pitch, -90.0F, 90.0F));
+        return new AimSolution(Mth.wrapDegrees(yaw), Mth.clamp(pitch, -90.0F, 90.0F), 0.0D);
     }
 
     private static double distanceToBoxSquared(Vec3 point, AABB box) {

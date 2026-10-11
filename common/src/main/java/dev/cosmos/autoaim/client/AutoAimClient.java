@@ -3,6 +3,8 @@ package dev.cosmos.autoaim.client;
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.architectury.event.events.client.ClientTickEvent;
 import dev.architectury.registry.client.keymappings.KeyMappingRegistry;
+import dev.cosmos.autoaim.client.aim.AimSmoothing;
+import dev.cosmos.autoaim.client.aim.AimSolution;
 import dev.cosmos.autoaim.client.aim.AutoAimController;
 import dev.cosmos.autoaim.client.aim.MeleeAimController;
 import dev.cosmos.autoaim.client.config.AutoAimConfig;
@@ -45,6 +47,7 @@ public final class AutoAimClient {
     private static boolean markerEnabled;
     private static Optional<BlockPos> markedBlock = Optional.empty();
     private static Entity markedEntity;
+    private static long previousAimFrameNanos;
 
     private AutoAimClient() {
     }
@@ -65,6 +68,64 @@ public final class AutoAimClient {
         return markedEntity == entity;
     }
 
+    /** Called once per frame, after mouse processing and before camera rendering. */
+    public static void onRenderFrame(Minecraft minecraft) {
+        if (!canAutoAim(minecraft)) {
+            PROJECTILE_AIM_CONTROLLER.clearTarget();
+            MELEE_AIM_CONTROLLER.clearTarget();
+            previousAimFrameNanos = 0L;
+            return;
+        }
+
+        Optional<AimSolution> solution = currentAimSolution(minecraft);
+        if (solution.isEmpty()) {
+            previousAimFrameNanos = 0L;
+            return;
+        }
+
+        long now = System.nanoTime();
+        double elapsedSeconds = previousAimFrameNanos == 0L
+                ? 0.0D
+                : (now - previousAimFrameNanos) / 1.0E9D;
+        previousAimFrameNanos = now;
+
+        LocalPlayer player = minecraft.player;
+        AimSolution aim = solution.get();
+        AimSmoothing.Rotation rotation = AimSmoothing.step(
+                player.getYRot(), player.getXRot(), aim.yaw(), aim.pitch(), elapsedSeconds
+        );
+        player.setYRot(rotation.yaw());
+        player.setXRot(rotation.pitch());
+        // The view is already smoothed per frame. Keep vanilla's previous-tick
+        // angles in sync so interpolation (including riding) cannot pull it back.
+        player.yRotO = rotation.yaw();
+        player.xRotO = rotation.pitch();
+    }
+
+    public static boolean shouldSuppressMouseTurn(Entity entity) {
+        Minecraft minecraft = Minecraft.getInstance();
+        return entity == minecraft.player
+                && canAutoAim(minecraft)
+                && currentAimSolution(minecraft).isPresent();
+    }
+
+    private static boolean canAutoAim(Minecraft minecraft) {
+        return HOLD_AUTO_AIM.isDown()
+                && minecraft.screen == null
+                && !minecraft.isPaused()
+                && minecraft.isWindowActive()
+                && minecraft.player != null
+                && minecraft.level != null
+                && minecraft.player.isAlive()
+                && !minecraft.player.isSpectator();
+    }
+
+    private static Optional<AimSolution> currentAimSolution(Minecraft minecraft) {
+        return MeleeCombat.isActive(minecraft.player)
+                ? MELEE_AIM_CONTROLLER.aimSolution(minecraft.player)
+                : PROJECTILE_AIM_CONTROLLER.aimSolution(minecraft.player);
+    }
+
     private static void onClientTick(Minecraft minecraft) {
         while (TOGGLE_MARKER.consumeClick()) {
             markerEnabled = !markerEnabled;
@@ -83,12 +144,13 @@ public final class AutoAimClient {
         }
 
         boolean meleeMode = MeleeCombat.isActive(minecraft.player);
+        boolean aimKeyHeld = canAutoAim(minecraft);
         if (meleeMode) {
             PROJECTILE_AIM_CONTROLLER.clearTarget();
-            MELEE_AIM_CONTROLLER.tick(minecraft, HOLD_AUTO_AIM.isDown());
+            MELEE_AIM_CONTROLLER.tick(minecraft, aimKeyHeld);
         } else {
             MELEE_AIM_CONTROLLER.clearTarget();
-            PROJECTILE_AIM_CONTROLLER.tick(minecraft, HOLD_AUTO_AIM.isDown());
+            PROJECTILE_AIM_CONTROLLER.tick(minecraft, aimKeyHeld);
         }
         updateMarker(minecraft, meleeMode);
     }
