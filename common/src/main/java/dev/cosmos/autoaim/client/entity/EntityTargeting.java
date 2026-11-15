@@ -12,12 +12,7 @@ public final class EntityTargeting {
     }
 
     public static boolean canProjectileCollide(LocalPlayer shooter, Entity entity) {
-        return entity != shooter
-                && entity.level() == shooter.level()
-                && entity.isAlive()
-                && !entity.isSpectator()
-                && entity.isPickable()
-                && !shooter.isPassengerOfSameVehicle(entity);
+        return ProjectileCollision.canHit(shooter, entity);
     }
 
     public static boolean canLock(LocalPlayer shooter, Entity entity) {

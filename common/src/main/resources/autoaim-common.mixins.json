@@ -6,6 +6,8 @@
   "client": [
     "EntityMixin",
     "MinecraftMixin",
+    "VecDeltaCodecAccessor",
+    "VecDeltaCodecTimingMixin",
     "LevelRendererMixin"
   ],
   "injectors": {

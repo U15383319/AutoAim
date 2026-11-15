@@ -1,5 +1,6 @@
 package dev.cosmos.autoaim.client.trajectory;
 
+import dev.cosmos.autoaim.client.compat.TaczCompat;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.player.LocalPlayer;
@@ -81,7 +82,7 @@ public final class WeaponBallistics {
     }
 
     public static boolean isSupportedProjectileItem(ItemStack stack) {
-        return isRangedWeapon(stack) || isThrowableItem(stack);
+        return isRangedWeapon(stack) || isThrowableItem(stack) || TaczCompat.isGun(stack);
     }
 
     private static boolean isRangedWeapon(ItemStack stack) {
@@ -90,7 +91,7 @@ public final class WeaponBallistics {
     }
 
     private static boolean canShowMarkerWhileHeld(ItemStack stack) {
-        return isChargedCrossbow(stack) || isThrowableItem(stack);
+        return isChargedCrossbow(stack) || isThrowableItem(stack) || TaczCompat.isGun(stack);
     }
 
     private static boolean isChargedCrossbow(ItemStack stack) {
@@ -118,6 +119,10 @@ public final class WeaponBallistics {
             boolean activelyUsing
     ) {
         Item item = stack.getItem();
+
+        if (TaczCompat.isGun(stack)) {
+            return TaczCompat.findWeapon(player, stack, hand);
+        }
 
         if (isFastThrowable(stack)) {
             return Optional.of(new WeaponContext(stack, hand, FAST_THROWABLE));

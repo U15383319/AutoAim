@@ -6,6 +6,10 @@ import net.minecraft.world.item.ItemStack;
 public record WeaponContext(
         ItemStack weapon,
         InteractionHand hand,
-        BallisticProfile ballistics
+        BallisticProfile ballistics,
+        boolean aimAtEyes
 ) {
+    public WeaponContext(ItemStack weapon, InteractionHand hand, BallisticProfile ballistics) {
+        this(weapon, hand, ballistics, false);
+    }
 }

@@ -7,6 +7,7 @@ import dev.cosmos.autoaim.client.aim.AimSmoothing;
 import dev.cosmos.autoaim.client.aim.AimSolution;
 import dev.cosmos.autoaim.client.aim.AutoAimController;
 import dev.cosmos.autoaim.client.aim.MeleeAimController;
+import dev.cosmos.autoaim.client.compat.TaczCompat;
 import dev.cosmos.autoaim.client.config.AutoAimConfig;
 import dev.cosmos.autoaim.client.melee.MeleeCombat;
 import dev.cosmos.autoaim.client.trajectory.TrajectoryCalculator;
@@ -20,6 +21,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.boss.EnderDragonPart;
 import org.lwjgl.glfw.GLFW;
@@ -48,6 +50,7 @@ public final class AutoAimClient {
     private static Optional<BlockPos> markedBlock = Optional.empty();
     private static Entity markedEntity;
     private static long previousAimFrameNanos;
+    private static volatile boolean activeTaczLock;
 
     private AutoAimClient() {
     }
@@ -71,6 +74,7 @@ public final class AutoAimClient {
     /** Called once per frame, after mouse processing and before camera rendering. */
     public static void onRenderFrame(Minecraft minecraft) {
         if (!canAutoAim(minecraft)) {
+            activeTaczLock = false;
             PROJECTILE_AIM_CONTROLLER.clearTarget();
             MELEE_AIM_CONTROLLER.clearTarget();
             previousAimFrameNanos = 0L;
@@ -79,6 +83,7 @@ public final class AutoAimClient {
 
         Optional<AimSolution> solution = currentAimSolution(minecraft);
         if (solution.isEmpty()) {
+            activeTaczLock = false;
             previousAimFrameNanos = 0L;
             return;
         }
@@ -90,6 +95,7 @@ public final class AutoAimClient {
         previousAimFrameNanos = now;
 
         LocalPlayer player = minecraft.player;
+        activeTaczLock = TaczCompat.isGun(player.getMainHandItem());
         AimSolution aim = solution.get();
         AimSmoothing.Rotation rotation = AimSmoothing.step(
                 player.getYRot(), player.getXRot(), aim.yaw(), aim.pitch(), elapsedSeconds
@@ -100,6 +106,29 @@ public final class AutoAimClient {
         // angles in sync so interpolation (including riding) cannot pull it back.
         player.yRotO = rotation.yaw();
         player.xRotO = rotation.pitch();
+    }
+
+    public static boolean hasActiveTaczLock() {
+        return activeTaczLock;
+    }
+
+    /** Called on the main thread immediately before TaCZ's player shoot packet. */
+    public static void syncTaczShotRotation(Minecraft minecraft) {
+        if (canAutoAim(minecraft) && TaczCompat.isGun(minecraft.player.getMainHandItem())) {
+            LocalPlayer player = minecraft.player;
+            // Tracking remains smooth between shots. At trigger time align the
+            // actual view and server angle with the newest solution, rather
+            // than firing the smoothing filter's older tracking angle.
+            PROJECTILE_AIM_CONTROLLER.tick(minecraft, true);
+            PROJECTILE_AIM_CONTROLLER.firingSolution(minecraft).ifPresent(aim -> {
+                player.setYRot(aim.yaw());
+                player.setXRot(aim.pitch());
+                player.yRotO = aim.yaw();
+                player.xRotO = aim.pitch();
+            });
+            player.connection.send(new ServerboundMovePlayerPacket.Rot(
+                    player.getYRot(), player.getXRot(), player.onGround()));
+        }
     }
 
     public static boolean shouldSuppressMouseTurn(Entity entity) {
@@ -127,6 +156,8 @@ public final class AutoAimClient {
     }
 
     private static void onClientTick(Minecraft minecraft) {
+        TaczCompat.clearCache();
+        PROJECTILE_AIM_CONTROLLER.observeTargets(minecraft);
         while (TOGGLE_MARKER.consumeClick()) {
             markerEnabled = !markerEnabled;
             AutoAimConfig.setMarkerEnabled(markerEnabled);
@@ -167,7 +198,8 @@ public final class AutoAimClient {
             return;
         }
 
-        Optional<Entity> lockedTarget = PROJECTILE_AIM_CONTROLLER.lockedTarget();
+        Optional<Entity> lockedTarget = PROJECTILE_AIM_CONTROLLER.lockedTarget()
+                .filter(target -> PROJECTILE_AIM_CONTROLLER.aimSolution(player).isPresent());
         if (lockedTarget.isPresent()) {
             markedEntity = glowEntityFor(lockedTarget.get());
             markedBlock = Optional.empty();

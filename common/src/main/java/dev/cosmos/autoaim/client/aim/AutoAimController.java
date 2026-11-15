@@ -29,6 +29,25 @@ public final class AutoAimController {
     private Entity lockedTarget;
     private LocalPlayer aimingPlayer;
     private AimSolution aimSolution;
+    private final TargetMotionTracker motionTracker = new TargetMotionTracker();
+    private ClientLevel observedLevel;
+
+    public void observeTargets(Minecraft minecraft) {
+        LocalPlayer player = minecraft.player;
+        ClientLevel level = minecraft.level;
+        if (level != observedLevel) {
+            motionTracker.clear();
+            observedLevel = level;
+        }
+        if (level != null && player != null) {
+            double range = AutoAimSettings.MAX_TRAJECTORY_DISTANCE + AutoAimSettings.TARGET_SEARCH_RADIUS;
+            for (Entity entity : level.entitiesForRendering()) {
+                if (entity != player && entity.isAlive() && player.distanceToSqr(entity) <= range * range) {
+                    motionTracker.observe(entity);
+                }
+            }
+        }
+    }
 
     public void tick(Minecraft minecraft, boolean aimKeyHeld) {
         aimSolution = null;
@@ -71,8 +90,29 @@ public final class AutoAimController {
                 level,
                 player,
                 lockedTarget,
-                context.ballistics()
+                context.ballistics(),
+                context.aimAtEyes(),
+                context.aimAtEyes() ? TargetMotion.trackedGun(Vec3.ZERO, lockedTarget.onGround())
+                        : TargetMotion.linear(lockedTarget.getDeltaMovement(), lockedTarget.onGround())
         ).orElse(null);
+    }
+
+    public Optional<AimSolution> firingSolution(Minecraft minecraft) {
+        LocalPlayer player = minecraft.player;
+        if (player == null || minecraft.level == null || player != aimingPlayer || !isValidTarget(player, lockedTarget)) {
+            return Optional.empty();
+        }
+        return WeaponBallistics.findAutoAimWeapon(player).flatMap(context -> {
+            if (!context.aimAtEyes()) return aimSolution(player);
+            var playerInfo = player.connection.getPlayerInfo(player.getUUID());
+            // The sample travels server -> client, then this shot travels
+            // client -> server. Use the measured round trip for both legs.
+            double roundTripTicks = playerInfo == null ? 0 : Math.max(0, playerInfo.getLatency()) / 50.0D;
+            // Keep speculative interception out of the continuously displayed
+            // camera rotation. Evaluate it only when an actual shot is queued.
+            return BallisticAimSolver.solve(minecraft.level, player, lockedTarget, context.ballistics(), true,
+                    motionTracker.motionOf(lockedTarget, roundTripTicks));
+        });
     }
 
     public void clearTarget() {
@@ -171,8 +211,7 @@ public final class AutoAimController {
         if (entity == null || !EntityTargeting.canLock(player, entity)) {
             return false;
         }
-        double maximumDistance = AutoAimSettings.MAX_TRAJECTORY_DISTANCE
-                + AutoAimSettings.TARGET_SEARCH_RADIUS;
+        double maximumDistance = AutoAimSettings.MAX_TRAJECTORY_DISTANCE;
         return player.distanceToSqr(entity) <= maximumDistance * maximumDistance;
     }
 

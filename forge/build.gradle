@@ -7,15 +7,126 @@ architectury {
     forge()
 }
 
+def gameTestsEnabled = providers.gradleProperty("autoaim_gametest").getOrElse("false").toBoolean()
+def taczDevEnabled = providers.gradleProperty("tacz_dev").getOrElse("true").toBoolean()
+def clientTestsEnabled = providers.gradleProperty("autoaim_clienttest").getOrElse("false").toBoolean()
+
+if (clientTestsEnabled) {
+    if (!taczDevEnabled) {
+        throw new GradleException("Client aim tests require -Ptacz_dev=true")
+    }
+    sourceSets.main.java.srcDir("src/clienttest/java")
+}
+
+if (gameTestsEnabled) {
+    sourceSets.main.java.srcDir("src/gametest/java")
+    sourceSets.main.resources.srcDir("src/gametest/resources")
+    if (!taczDevEnabled) {
+        sourceSets.main.java.exclude("**/TaczAimGameTests.java")
+    }
+}
+
 loom {
     forge {
         mixinConfig "autoaim-common.mixins.json"
+        mixinConfig "autoaim-forge.mixins.json"
+    }
+    runs {
+        client {
+            vmArg "-Xmx4G"
+            if (clientTestsEnabled) {
+                runDir "build/clienttest"
+                property "autoaim.clienttest.enabled", "true"
+                property "autoaim.clienttest.report", file("build/reports/client-aim.json").absolutePath
+                property "autoaim.clienttest.case", providers.gradleProperty("autoaim_clienttest_case").getOrElse("all")
+            }
+        }
+        if (gameTestsEnabled) {
+            gameTestServer {
+                environment "server"
+                forgeTemplate "gameTestServer"
+                name "Auto Aim GameTests"
+                runDir "build/gametest"
+                property "forge.enabledGameTestNamespaces", "autoaim"
+                property "forge.enableGameTest", "true"
+                property "forge.gameTestServer", "true"
+                property "autoaim.gametest.report", file("build/reports/gametest-${taczDevEnabled ? 'tacz' : 'standalone'}.xml").absolutePath
+                vmArg "-Xmx2G"
+            }
+        }
+    }
+}
+
+if (clientTestsEnabled) {
+    def prepareClientTestWorld = tasks.register("prepareClientTestWorld", Sync) {
+        def testDirectory = layout.buildDirectory.dir("clienttest/saves").get().asFile.canonicalFile
+        def testWorld = new File(testDirectory, "autoaim-test").canonicalFile
+        // Minecraft mutates the copied world after Sync finishes. Never reuse
+        // it based on Gradle's earlier snapshot (e.g. a previous test's floor).
+        outputs.upToDateWhen { false }
+        doFirst {
+            if (testWorld.parentFile != testDirectory
+                    || !testWorld.toPath().startsWith(layout.buildDirectory.get().asFile.canonicalFile.toPath())
+                    || !file("build/gametest/world/level.dat").exists()) {
+                throw new GradleException("Client tests require the isolated GameTest world under forge/build/gametest")
+            }
+            delete(testWorld)
+        }
+        from("build/gametest/world")
+        into(testWorld)
+        exclude "session.lock", "playerdata/**", "advancements/**", "stats/**"
+    }
+    tasks.named("runClient") {
+        dependsOn(prepareClientTestWorld)
+        doFirst { delete(file("build/reports/client-aim.json")) }
+        doLast {
+            def report = file("build/reports/client-aim.json")
+            if (!report.exists() || !new groovy.json.JsonSlurper().parse(report).passed) {
+                throw new GradleException("Client aim integration failed; see forge/build/reports/client-aim.json")
+            }
+        }
+    }
+}
+
+if (gameTestsEnabled) {
+    def resetGameTestWorld = tasks.register("resetGameTestWorld", Delete) {
+        def testDirectory = layout.buildDirectory.dir("gametest").get().asFile.canonicalFile
+        def testWorld = new File(testDirectory, "world").canonicalFile
+        doFirst {
+            if (testWorld.parentFile != testDirectory) {
+                throw new GradleException("GameTest world must stay inside forge/build/gametest")
+            }
+        }
+        delete(testWorld)
+    }
+    tasks.named("runGameTestServer") {
+        dependsOn(resetGameTestWorld)
+    }
+}
+
+tasks.withType(Jar).configureEach {
+    exclude "dev/cosmos/autoaim/forge/gametest/**"
+    exclude "dev/cosmos/autoaim/forge/clienttest/**"
+    exclude "data/autoaim/structures/range.nbt"
+}
+
+repositories {
+    maven {
+        name = "Modrinth"
+        url = "https://api.modrinth.com/maven"
+        content {
+            includeGroup "maven.modrinth"
+        }
     }
 }
 
 configurations {
     common
     shadowCommon // Don't use shadow from the shadow plugin since it *excludes* files.
+    taczDevelopmentBundle {
+        canBeConsumed = false
+        transitive = false
+    }
     compileClasspath.extendsFrom common
     runtimeClasspath.extendsFrom common
     developmentForge.extendsFrom common
@@ -25,6 +136,53 @@ dependencies {
     forge "net.minecraftforge:forge:${rootProject.forge_version}"
     // Remove the next line if you don't want to depend on the API
     modApi "dev.architectury:architectury-forge:${rootProject.architectury_version}"
+
+    // Remap TaCZ for development runs only; do not publish or bundle it.
+    if (taczDevEnabled) {
+        def taczCoordinate = "maven.modrinth:timeless-and-classics-zero:${rootProject.tacz_version}"
+        modLocalRuntime(taczCoordinate) {
+            transitive = false
+        }
+        taczDevelopmentBundle(taczCoordinate)
+        if (gameTestsEnabled || clientTestsEnabled) {
+            modCompileOnly(taczCoordinate) { transitive = false }
+        }
+
+        // Loom 1.3 does not expose TaCZ's jar-in-jar libraries to Forge userdev.
+        // Resolve the exact libraries bundled in this release, not extra versions.
+        def nestedLibraries = providers.provider {
+            def librariesByName = [:]
+            def collectLibraries
+            collectLibraries = { bundle ->
+                zipTree(bundle).matching {
+                    include "META-INF/jarjar/*.jar", "META-INF/jars/*.jar"
+                }.files.each { library ->
+                    if (!librariesByName.containsKey(library.name)) {
+                        librariesByName[library.name] = library
+                        collectLibraries(library)
+                    }
+                }
+            }
+            collectLibraries(configurations.taczDevelopmentBundle.singleFile)
+            librariesByName.values().toList()
+        }
+        def isModLibrary = { library ->
+            def archive = new java.util.zip.ZipFile(library)
+            try {
+                return archive.getEntry("META-INF/mods.toml") != null
+            } finally {
+                archive.close()
+            }
+        }
+        def bundledMods = nestedLibraries.map { libraries -> libraries.findAll(isModLibrary) }
+        def bundledLibraries = nestedLibraries.map { libraries -> libraries.findAll { !isModLibrary(it) } }
+        modLocalRuntime(files(bundledMods))
+        localRuntime(files(bundledLibraries))
+        forgeRuntimeLibrary(files(bundledLibraries))
+        if (gameTestsEnabled || clientTestsEnabled) {
+            compileOnly(files(bundledLibraries))
+        }
+    }
 
     common(project(path: ":common", configuration: "namedElements")) { transitive false }
     shadowCommon(project(path: ":common", configuration: "transformProductionForge")) { transitive = false }

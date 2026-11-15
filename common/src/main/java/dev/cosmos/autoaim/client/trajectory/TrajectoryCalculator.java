@@ -1,16 +1,14 @@
 package dev.cosmos.autoaim.client.trajectory;
 
 import dev.cosmos.autoaim.client.AutoAimSettings;
-import dev.cosmos.autoaim.client.entity.EntityTargeting;
-import net.fabricmc.api.EnvType;
-import net.fabricmc.api.Environment;
-import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.player.LocalPlayer;
+import dev.cosmos.autoaim.client.entity.ProjectileCollision;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
@@ -22,7 +20,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.Predicate;
 
-@Environment(EnvType.CLIENT)
 public final class TrajectoryCalculator {
     private static final double EPSILON = 1.0E-7D;
     private static final double ENTITY_QUERY_INFLATION = 1.0D;
@@ -36,8 +33,8 @@ public final class TrajectoryCalculator {
      * once per simulated tick.
      */
     public static TrajectoryResult trace(
-            ClientLevel level,
-            LocalPlayer shooter,
+            Level level,
+            LivingEntity shooter,
             BallisticProfile profile,
             float pitch,
             float yaw
@@ -69,18 +66,18 @@ public final class TrajectoryCalculator {
      * range limit. This form is also used to validate a prospective aim solution.
      */
     public static TrajectoryResult traceIgnoringEntities(
-            ClientLevel level,
-            LocalPlayer shooter,
+            Level level,
+            LivingEntity shooter,
             BallisticProfile profile,
             float pitch,
             float yaw
     ) {
-        Vec3 position = launchOrigin(shooter);
+        Vec3 position = launchOrigin(shooter, profile);
         Vec3 velocity = initialVelocity(shooter, profile, pitch, yaw);
         double traveled = 0.0D;
         List<TrajectorySegment> segments = new ArrayList<>();
 
-        for (int tick = 0; tick < AutoAimSettings.MAX_FLIGHT_TICKS; tick++) {
+        for (int tick = 0; tick < profile.maxFlightTicks(); tick++) {
             Vec3 next = position.add(velocity);
             double segmentLength = position.distanceTo(next);
             boolean reachedLimit = traveled + segmentLength > AutoAimSettings.MAX_TRAJECTORY_DISTANCE;
@@ -115,8 +112,10 @@ public final class TrajectoryCalculator {
 
             traveled += segmentLength;
             position = next;
-            double drag = dragAt(level, position, profile);
-            velocity = velocity.scale(drag).add(0.0D, -profile.gravity(), 0.0D);
+            boolean inWater = level.getFluidState(BlockPos.containing(position)).is(FluidTags.WATER);
+            double drag = inWater ? profile.waterDrag() : profile.airDrag();
+            double gravity = profile.gravity() * (inWater ? profile.waterGravityMultiplier() : 1.0D);
+            velocity = velocity.scale(drag).add(0.0D, -gravity, 0.0D);
         }
 
         return new TrajectoryResult(
@@ -124,13 +123,13 @@ public final class TrajectoryCalculator {
                 Optional.empty(),
                 Optional.empty(),
                 segments,
-                AutoAimSettings.MAX_FLIGHT_TICKS
+                profile.maxFlightTicks()
         );
     }
 
     public static Optional<EntityCollision> findFirstEntityCollision(
-            ClientLevel level,
-            LocalPlayer shooter,
+            Level level,
+            LivingEntity shooter,
             List<TrajectorySegment> segments,
             Predicate<Entity> additionalFilter
     ) {
@@ -143,7 +142,7 @@ public final class TrajectoryCalculator {
         for (Entity entity : level.getEntities(
                 shooter,
                 queryBounds,
-                candidate -> EntityTargeting.canProjectileCollide(shooter, candidate)
+                candidate -> ProjectileCollision.canHit(shooter, candidate)
                         && additionalFilter.test(candidate)
         )) {
             Optional<PathIntersection> intersection = findIntersection(
@@ -194,11 +193,18 @@ public final class TrajectoryCalculator {
         return bounds;
     }
 
-    public static Vec3 launchOrigin(LocalPlayer shooter) {
+    public static Vec3 launchOrigin(LivingEntity shooter, BallisticProfile profile) {
+        if (profile.interpolatedLaunchPosition()) {
+            return new Vec3(
+                    Mth.lerp(0.5D, shooter.xOld, shooter.getX()),
+                    Mth.lerp(0.5D, shooter.yOld, shooter.getY()) + shooter.getEyeHeight(),
+                    Mth.lerp(0.5D, shooter.zOld, shooter.getZ())
+            );
+        }
         return new Vec3(shooter.getX(), shooter.getEyeY() - 0.1D, shooter.getZ());
     }
 
-    public static Vec3 inheritedMovement(LocalPlayer shooter, BallisticProfile profile) {
+    public static Vec3 inheritedMovement(LivingEntity shooter, BallisticProfile profile) {
         if (!profile.inheritsShooterMovement()) {
             return Vec3.ZERO;
         }
@@ -207,7 +213,7 @@ public final class TrajectoryCalculator {
     }
 
     public static Vec3 initialVelocity(
-            LocalPlayer shooter,
+            LivingEntity shooter,
             BallisticProfile profile,
             float pitch,
             float yaw
@@ -236,8 +242,8 @@ public final class TrajectoryCalculator {
     }
 
     public static BlockHitResult clipBlocks(
-            ClientLevel level,
-            LocalPlayer shooter,
+            Level level,
+            LivingEntity shooter,
             Vec3 from,
             Vec3 to
     ) {
@@ -250,7 +256,7 @@ public final class TrajectoryCalculator {
         ));
     }
 
-    public static double dragAt(ClientLevel level, Vec3 position, BallisticProfile profile) {
+    public static double dragAt(Level level, Vec3 position, BallisticProfile profile) {
         boolean inWater = level.getFluidState(BlockPos.containing(position)).is(FluidTags.WATER);
         return inWater ? profile.waterDrag() : profile.airDrag();
     }

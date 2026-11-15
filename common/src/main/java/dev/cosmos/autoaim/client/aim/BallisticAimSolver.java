@@ -3,12 +3,10 @@ package dev.cosmos.autoaim.client.aim;
 import dev.cosmos.autoaim.client.AutoAimSettings;
 import dev.cosmos.autoaim.client.trajectory.BallisticProfile;
 import dev.cosmos.autoaim.client.trajectory.TrajectoryCalculator;
-import net.fabricmc.api.EnvType;
-import net.fabricmc.api.Environment;
-import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
@@ -17,9 +15,9 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
-@Environment(EnvType.CLIENT)
 public final class BallisticAimSolver {
-    private static final double[] TARGET_HEIGHT_FRACTIONS = {0.55D, 0.75D, 0.35D};
+    private static final double[] BODY_HEIGHT_FRACTIONS = {0.55D, 0.75D, 0.35D};
+    private static final double EYE_HIT_TOLERANCE = 0.1D;
     private static final double ROOT_SCAN_STEP = 0.25D;
     private static final double EPSILON = 1.0E-7D;
 
@@ -27,22 +25,39 @@ public final class BallisticAimSolver {
     }
 
     public static Optional<AimSolution> solve(
-            ClientLevel level,
-            LocalPlayer shooter,
+            Level level,
+            LivingEntity shooter,
             Entity target,
             BallisticProfile profile
     ) {
-        Vec3 origin = TrajectoryCalculator.launchOrigin(shooter);
+        return solve(level, shooter, target, profile, false);
+    }
+
+    public static Optional<AimSolution> solve(
+            Level level,
+            LivingEntity shooter,
+            Entity target,
+            BallisticProfile profile,
+            boolean aimAtEyes
+    ) {
+        return solve(level, shooter, target, profile, aimAtEyes,
+                TargetMotion.linear(target.getDeltaMovement(), target.onGround()));
+    }
+
+    public static Optional<AimSolution> solve(
+            Level level,
+            LivingEntity shooter,
+            Entity target,
+            BallisticProfile profile,
+            boolean aimAtEyes,
+            TargetMotion motion
+    ) {
+        Vec3 origin = TrajectoryCalculator.launchOrigin(shooter, profile);
         Vec3 inheritedMovement = TrajectoryCalculator.inheritedMovement(shooter, profile);
         AABB targetBox = target.getBoundingBox();
 
-        for (double heightFraction : TARGET_HEIGHT_FRACTIONS) {
-            Vec3 baseAimPoint = new Vec3(
-                    (targetBox.minX + targetBox.maxX) * 0.5D,
-                    Mth.lerp(heightFraction, targetBox.minY, targetBox.maxY),
-                    (targetBox.minZ + targetBox.maxZ) * 0.5D
-            );
-
+        Vec3 eyePosition = target instanceof LivingEntity ? target.getEyePosition() : null;
+        for (Vec3 baseAimPoint : targetAimPoints(targetBox, eyePosition, aimAtEyes)) {
             List<KinematicSolution> seeds = solveArcs(origin, baseAimPoint, inheritedMovement, profile);
             for (KinematicSolution seed : seeds) {
                 KinematicSolution refined = seed;
@@ -52,7 +67,10 @@ public final class BallisticAimSolver {
                 // Two refinement passes are enough to lead ordinary walking/running targets
                 // without making erratic entity velocity dominate the aim point.
                 for (int pass = 0; pass < 2; pass++) {
-                    lead = calculateLead(target, refined.flightTicks());
+                    // The client already displays an interpolated pose. Do not
+                    // rewind it again or add an assumed network delay.
+                    lead = motion.lead(refined.flightTicks(),
+                            level.isClientSide ? 0 : profile.horizontalHitboxMotionOffset());
                     List<KinematicSolution> refinedArcs = solveArcs(
                             origin,
                             baseAimPoint.add(lead),
@@ -70,8 +88,7 @@ public final class BallisticAimSolver {
                     continue;
                 }
 
-                AABB predictedTargetBox = targetBox.move(lead)
-                        .inflate(AutoAimSettings.PROJECTILE_HIT_INFLATION);
+                AABB predictedTargetBox = targetHitBounds(targetBox, eyePosition, aimAtEyes).move(lead);
                 if (canHitTarget(level, shooter, target, profile, refined, predictedTargetBox)) {
                     return Optional.of(new AimSolution(
                             Mth.wrapDegrees(refined.yaw()),
@@ -85,6 +102,32 @@ public final class BallisticAimSolver {
         return Optional.empty();
     }
 
+    static List<Vec3> targetAimPoints(AABB targetBox, Vec3 eyePosition, boolean aimAtEyes) {
+        if (aimAtEyes) {
+            // getEyePosition is also the origin of Minecraft's debug view ray.
+            // Non-living targets such as vehicles and crystals use their center.
+            return List.of(eyePosition != null ? eyePosition : targetBox.getCenter());
+        }
+
+        List<Vec3> points = new ArrayList<>(BODY_HEIGHT_FRACTIONS.length);
+        for (double fraction : BODY_HEIGHT_FRACTIONS) {
+            points.add(new Vec3(
+                    (targetBox.minX + targetBox.maxX) * 0.5D,
+                    Mth.lerp(fraction, targetBox.minY, targetBox.maxY),
+                    (targetBox.minZ + targetBox.maxZ) * 0.5D
+            ));
+        }
+        return points;
+    }
+
+    static AABB targetHitBounds(AABB targetBox, Vec3 eyePosition, boolean aimAtEyes) {
+        if (aimAtEyes && eyePosition != null) {
+            // Reaching the torso is not enough to validate an eye-level shot.
+            return new AABB(eyePosition, eyePosition).inflate(EYE_HIT_TOLERANCE);
+        }
+        return targetBox.inflate(AutoAimSettings.PROJECTILE_HIT_INFLATION);
+    }
+
     private static List<KinematicSolution> solveArcs(
             Vec3 origin,
             Vec3 target,
@@ -96,7 +139,8 @@ public final class BallisticAimSolver {
         }
 
         List<KinematicSolution> solutions = new ArrayList<>(2);
-        double previousTime = 0.05D;
+        // Fast bullets can reach nearby targets in much less than 0.05 ticks.
+        double previousTime = 1.0E-5D;
         double previousError = requiredSpeedError(
                 origin,
                 target,
@@ -105,9 +149,8 @@ public final class BallisticAimSolver {
                 previousTime
         );
 
-        for (double time = previousTime + ROOT_SCAN_STEP;
-             time <= AutoAimSettings.MAX_FLIGHT_TICKS;
-             time += ROOT_SCAN_STEP) {
+        while (previousTime < profile.maxFlightTicks()) {
+            double time = Math.min(previousTime + ROOT_SCAN_STEP, profile.maxFlightTicks());
             double error = requiredSpeedError(origin, target, inheritedMovement, profile, time);
             if (Double.isFinite(previousError) && Double.isFinite(error)
                     && Math.signum(previousError) != Math.signum(error)) {
@@ -196,14 +239,21 @@ public final class BallisticAimSolver {
             double flightTicks
     ) {
         double drag = profile.airDrag();
+        double completeTicks = Math.floor(flightTicks);
+        double fraction = flightTicks - completeTicks;
         double displacementMultiplier;
         double gravityDisplacement;
 
+        // Interpolate within the final simulated tick, just as collision tracing
+        // does. Extending the geometric series to a fractional exponent bends
+        // that segment and even applies gravity before the first tick ends.
         if (Math.abs(1.0D - drag) < EPSILON) {
             displacementMultiplier = flightTicks;
-            gravityDisplacement = profile.gravity() * flightTicks * (flightTicks - 1.0D) * 0.5D;
+            gravityDisplacement = profile.gravity()
+                    * (completeTicks * (completeTicks - 1.0D) * 0.5D + fraction * completeTicks);
         } else {
-            displacementMultiplier = (1.0D - Math.pow(drag, flightTicks)) / (1.0D - drag);
+            double dragPower = Math.pow(drag, completeTicks);
+            displacementMultiplier = (1.0D - dragPower) / (1.0D - drag) + fraction * dragPower;
             gravityDisplacement = profile.gravity() / (1.0D - drag)
                     * (flightTicks - displacementMultiplier);
         }
@@ -257,19 +307,6 @@ public final class BallisticAimSolver {
         return (float) Math.toDegrees(Math.atan(playerPitchTangent));
     }
 
-    private static Vec3 calculateLead(Entity target, double flightTicks) {
-        // Keep all three velocity components so elytra users, flying mobs, falling
-        // entities, and other airborne targets receive an appropriate lead.
-        Vec3 velocity = target.getDeltaMovement();
-        double leadTicks = Math.min(flightTicks, AutoAimSettings.MAX_TARGET_LEAD_TICKS);
-        Vec3 lead = velocity.scale(leadTicks);
-        double length = lead.length();
-        if (length > AutoAimSettings.MAX_TARGET_LEAD_DISTANCE) {
-            lead = lead.scale(AutoAimSettings.MAX_TARGET_LEAD_DISTANCE / length);
-        }
-        return lead;
-    }
-
     private static KinematicSolution closestInFlightTime(
             List<KinematicSolution> solutions,
             double flightTicks
@@ -280,8 +317,8 @@ public final class BallisticAimSolver {
     }
 
     private static boolean canHitTarget(
-            ClientLevel level,
-            LocalPlayer shooter,
+            Level level,
+            LivingEntity shooter,
             Entity target,
             BallisticProfile profile,
             KinematicSolution solution,
