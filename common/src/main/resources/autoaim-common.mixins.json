@@ -6,6 +6,7 @@
   "client": [
     "EntityMixin",
     "MinecraftMixin",
+    "MultiPlayerGameModeMixin",
     "VecDeltaCodecAccessor",
     "VecDeltaCodecTimingMixin",
     "LevelRendererMixin"

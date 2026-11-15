@@ -83,7 +83,9 @@ public final class TaczClientIntegration {
             }
         }
         String selected = System.getProperty("autoaim.clienttest.case", "all");
-        if (selected.equals("natural")) {
+        if (selected.equals("vanilla")) {
+            SCENARIOS.clear();
+        } else if (selected.equals("natural")) {
             SCENARIOS.removeIf(scenario -> scenario.movement == Movement.FIXED);
         } else if (selected.equals("accuracy")) {
             SCENARIOS.removeIf(scenario -> scenario.movement != Movement.FIXED);

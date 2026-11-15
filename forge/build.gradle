@@ -10,12 +10,16 @@ architectury {
 def gameTestsEnabled = providers.gradleProperty("autoaim_gametest").getOrElse("false").toBoolean()
 def taczDevEnabled = providers.gradleProperty("tacz_dev").getOrElse("true").toBoolean()
 def clientTestsEnabled = providers.gradleProperty("autoaim_clienttest").getOrElse("false").toBoolean()
+def clientTestCase = providers.gradleProperty("autoaim_clienttest_case").getOrElse("all")
+def vanillaClientTests = clientTestCase == "vanilla"
+def clientTestReport = file("build/reports/${vanillaClientTests ? 'vanilla-aim' : 'client-aim'}.json")
 
 if (clientTestsEnabled) {
-    if (!taczDevEnabled) {
+    if (!taczDevEnabled && !vanillaClientTests) {
         throw new GradleException("Client aim tests require -Ptacz_dev=true")
     }
     sourceSets.main.java.srcDir("src/clienttest/java")
+    if (!taczDevEnabled) sourceSets.main.java.exclude("**/TaczClientIntegration.java")
 }
 
 if (gameTestsEnabled) {
@@ -36,9 +40,12 @@ loom {
             vmArg "-Xmx4G"
             if (clientTestsEnabled) {
                 runDir "build/clienttest"
-                property "autoaim.clienttest.enabled", "true"
-                property "autoaim.clienttest.report", file("build/reports/client-aim.json").absolutePath
-                property "autoaim.clienttest.case", providers.gradleProperty("autoaim_clienttest_case").getOrElse("all")
+                property "autoaim.clienttest.enabled", (!vanillaClientTests).toString()
+                property "autoaim.vanillatest.enabled", vanillaClientTests.toString()
+                property "autoaim.vanillatest.case", providers.gradleProperty("autoaim_vanilla_case").getOrElse("all")
+                property "autoaim.clienttest.background", "true"
+                property "autoaim.clienttest.report", clientTestReport.absolutePath
+                property "autoaim.clienttest.case", clientTestCase
             }
         }
         if (gameTestsEnabled) {
@@ -78,11 +85,18 @@ if (clientTestsEnabled) {
     }
     tasks.named("runClient") {
         dependsOn(prepareClientTestWorld)
-        doFirst { delete(file("build/reports/client-aim.json")) }
+        doFirst {
+            delete(clientTestReport)
+            def testOptions = file("build/clienttest/options.txt")
+            testOptions.parentFile.mkdirs()
+            def lines = testOptions.exists() ? testOptions.readLines("UTF-8") : []
+            lines = lines.findAll { !it.startsWith("soundCategory_master:") && !it.startsWith("pauseOnLostFocus:") }
+            testOptions.setText((lines + ["soundCategory_master:0.0", "pauseOnLostFocus:false"]).join("\n") + "\n", "UTF-8")
+        }
         doLast {
-            def report = file("build/reports/client-aim.json")
+            def report = clientTestReport
             if (!report.exists() || !new groovy.json.JsonSlurper().parse(report).passed) {
-                throw new GradleException("Client aim integration failed; see forge/build/reports/client-aim.json")
+                throw new GradleException("Client aim integration failed; see ${clientTestReport}")
             }
         }
     }

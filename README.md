@@ -31,6 +31,16 @@ temporarily suppressed during that lock to prevent it from fighting the aim.
 Releasing **V**, losing a valid aim solution, or opening a screen restores normal
 mouse look.
 
+Bow, crossbow, and ordinary trident locks follow the target's current body aim
+point with drop compensation. Bow tracking uses a full-draw profile throughout
+charging, and ordinary tridents keep their lock from the start of wind-up.
+Changing draw power and a struck target's knockback velocity therefore do not
+pull the camera up and down. When firing, the client computes
+the shot with the actual draw power and simple velocity-based lead, sends that
+angle before the vanilla use/release packet, and restores the local view within
+the same call, before another frame renders. Riptide and other throwable items
+retain their existing behavior. Trajectory markers still use actual draw power.
+
 Both keys can be changed in Minecraft's Controls screen. The acquisition tube is
 limited to 12 blocks around the trajectory, and trajectories are limited to 128
 blocks. All projectile-collidable entity types are eligible, including airborne
@@ -83,8 +93,8 @@ assumed. This vertical alignment is bounded by one additional block and applies
 only to the shot, not to continuous tracking. Uncertain vertical motion uses the
 latest observed height without extrapolating it through any further time. A valid solver result is not a promise
 that a changing target will receive a headshot.
-Vanilla ranged weapons independently retain their simple velocity-based lead,
-body aim points, and existing ballistic profiles.
+Vanilla weapons keep their body aim points and ballistic profiles. Bow, crossbow,
+and ordinary trident motion lead is applied only when firing, as described above.
 
 Between shots, the view follows smoothly. At the trigger, the client aligns its
 view with the latest bounded interception solution and sends that rotation immediately before
@@ -207,8 +217,24 @@ index, `-Pautoaim_clienttest_case=natural` for just the eight AI scenarios, or
 Every invocation recreates only the isolated copied world so a previous
 scenario's saved blocks cannot invalidate an airborne test.
 
-Both integration suites remove random spread only in their test fixtures to
-check the central trajectory. Production gun spread is unchanged. These tests
+For vanilla charging and impact camera regressions, run
+`./gradlew -Pautoaim_clienttest=true -Pautoaim_clienttest_case=vanilla :forge:runClient`.
+The 16 scenarios cover bow/trident charging at 8, 24, 40, and 64 blocks,
+crossbow knockback and lethal hits, mouse suppression during trident wind-up,
+and partial-draw bow shots. They check rendered camera motion and real native
+projectile hits; the fixture removes random spread using the server's actual
+launch angle and draw power. Results are saved to
+`forge/build/reports/vanilla-aim.json`. Add `-Pautoaim_vanilla_case=trident` to run
+only the trident cases. Use `-Pautoaim_vanilla_case=unlocked -Ptacz_dev=false` for
+three cases that verify unchanged manual aim and native hits without TaCZ or
+the lock key held.
+
+Automated client runs hide the test window and mute its master volume. These
+settings apply only to `forge/build/clienttest/options.txt`; ordinary development
+client settings in `forge/run` are preserved.
+
+Integration tests remove random spread only in their test fixtures to
+check the central trajectory. Production projectile spread is unchanged. These tests
 do not guarantee hits after an unpredictable turn, a teleport, or arbitrary
 network delay, and cannot predict server-only custom ballistic scripts.
 TaCZ 1.2.0 also offsets a moving entity's collision box vertically while testing

@@ -43,6 +43,43 @@ public final class WeaponBallistics {
         return findHeldWeapon(player, false);
     }
 
+    public static Optional<WeaponContext> findTrackingWeapon(LocalPlayer player) {
+        if (player.isUsingItem()) {
+            ItemStack stack = player.getUseItem();
+            if (stack.getItem() instanceof BowItem) {
+                // Low draw power is relevant at release, not while following
+                // a target: its near-range arc can swing almost vertically.
+                return createContext(player, stack, player.getUsedItemHand(), false);
+            }
+            if (stack.getItem() instanceof TridentItem && EnchantmentHelper.getRiptide(stack) == 0) {
+                // Keep the lock through the first ten ticks of wind-up.
+                return Optional.of(new WeaponContext(stack, player.getUsedItemHand(), TRIDENT));
+            }
+        }
+        return findAutoAimWeapon(player);
+    }
+
+    public static boolean usesStableTracking(WeaponContext context) {
+        Item item = context.weapon().getItem();
+        return item instanceof BowItem || item instanceof CrossbowItem
+                || (item instanceof TridentItem && EnchantmentHelper.getRiptide(context.weapon()) == 0);
+    }
+
+    public static Optional<WeaponContext> findReleaseShot(LocalPlayer player) {
+        if (!player.isUsingItem()) return Optional.empty();
+        ItemStack stack = player.getUseItem();
+        if (!(stack.getItem() instanceof BowItem)
+                && !(stack.getItem() instanceof TridentItem && EnchantmentHelper.getRiptide(stack) == 0)) {
+            return Optional.empty();
+        }
+        return createContext(player, stack, player.getUsedItemHand(), true);
+    }
+
+    public static Optional<WeaponContext> findCrossbowShot(LocalPlayer player, InteractionHand hand) {
+        ItemStack stack = player.getItemInHand(hand);
+        return isChargedCrossbow(stack) ? createContext(player, stack, hand, false) : Optional.empty();
+    }
+
     private static Optional<WeaponContext> findHeldWeapon(LocalPlayer player, boolean markerMode) {
         if (player.isUsingItem() && isSupportedProjectileItem(player.getUseItem())) {
             return createContext(player, player.getUseItem(), player.getUsedItemHand(), true);

@@ -138,6 +138,40 @@ public final class AutoAimClient {
                 && currentAimSolution(minecraft).isPresent();
     }
 
+    /** A vanilla shot sends its computed angle without moving the rendered view. */
+    public static VanillaShotRotation beginVanillaShot(Minecraft minecraft, WeaponContext weapon, boolean sendPosition) {
+        if (!canAutoAim(minecraft)) return null;
+        PROJECTILE_AIM_CONTROLLER.tick(minecraft, true);
+        Optional<AimSolution> solution = PROJECTILE_AIM_CONTROLLER.firingSolution(minecraft, weapon);
+        if (solution.isEmpty()) return null;
+        LocalPlayer player = minecraft.player;
+        VanillaShotRotation saved = new VanillaShotRotation(player, player.getYRot(), player.getXRot(), player.yRotO, player.xRotO);
+        AimSolution aim = solution.get();
+        player.setYRot(aim.yaw());
+        player.setXRot(aim.pitch());
+        player.yRotO = aim.yaw();
+        player.xRotO = aim.pitch();
+        if (sendPosition) {
+            player.connection.send(new ServerboundMovePlayerPacket.PosRot(player.getX(), player.getY(), player.getZ(),
+                    aim.yaw(), aim.pitch(), player.onGround()));
+        }
+        return saved;
+    }
+
+    public static void endVanillaShot(Minecraft minecraft, VanillaShotRotation saved) {
+        if (saved == null || minecraft.player != saved.player()) return;
+        LocalPlayer player = saved.player();
+        player.setYRot(saved.yaw());
+        player.setXRot(saved.pitch());
+        player.yRotO = saved.previousYaw();
+        player.xRotO = saved.previousPitch();
+        // The use/release packet is already queued; restore the normal server
+        // view after it, including when vanilla does not send another rotation.
+        player.connection.send(new ServerboundMovePlayerPacket.Rot(saved.yaw(), saved.pitch(), player.onGround()));
+    }
+
+    public record VanillaShotRotation(LocalPlayer player, float yaw, float pitch, float previousYaw, float previousPitch) {}
+
     private static boolean canAutoAim(Minecraft minecraft) {
         return HOLD_AUTO_AIM.isDown()
                 && minecraft.screen == null

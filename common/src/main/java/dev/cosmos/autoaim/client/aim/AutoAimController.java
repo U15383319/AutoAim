@@ -58,11 +58,10 @@ public final class AutoAimController {
             return;
         }
 
-        Optional<WeaponContext> weapon = WeaponBallistics.findAutoAimWeapon(player);
+        Optional<WeaponContext> weapon = WeaponBallistics.findTrackingWeapon(player);
         if (weapon.isEmpty()) {
-            // A bow's first few draw ticks and a trident's pre-throw wind-up do not
-            // yet have a usable trajectory. Keep an existing lock so it can resume
-            // as soon as the charge becomes valid.
+            // Some launch modes, such as Riptide, still require a valid charge.
+            // Retain the target until their trajectory becomes available.
             if (player.isUsingItem() && WeaponBallistics.isSupportedProjectileItem(player.getUseItem())) {
                 return;
             }
@@ -92,27 +91,29 @@ public final class AutoAimController {
                 lockedTarget,
                 context.ballistics(),
                 context.aimAtEyes(),
-                context.aimAtEyes() ? TargetMotion.trackedGun(Vec3.ZERO, lockedTarget.onGround())
+                context.aimAtEyes() || WeaponBallistics.usesStableTracking(context)
+                        ? TargetMotion.linear(Vec3.ZERO, lockedTarget.onGround())
                         : TargetMotion.linear(lockedTarget.getDeltaMovement(), lockedTarget.onGround())
         ).orElse(null);
     }
 
     public Optional<AimSolution> firingSolution(Minecraft minecraft) {
         LocalPlayer player = minecraft.player;
+        return player == null ? Optional.empty() : WeaponBallistics.findAutoAimWeapon(player)
+                .flatMap(context -> firingSolution(minecraft, context));
+    }
+
+    public Optional<AimSolution> firingSolution(Minecraft minecraft, WeaponContext context) {
+        LocalPlayer player = minecraft.player;
         if (player == null || minecraft.level == null || player != aimingPlayer || !isValidTarget(player, lockedTarget)) {
             return Optional.empty();
         }
-        return WeaponBallistics.findAutoAimWeapon(player).flatMap(context -> {
-            if (!context.aimAtEyes()) return aimSolution(player);
-            var playerInfo = player.connection.getPlayerInfo(player.getUUID());
-            // The sample travels server -> client, then this shot travels
-            // client -> server. Use the measured round trip for both legs.
-            double roundTripTicks = playerInfo == null ? 0 : Math.max(0, playerInfo.getLatency()) / 50.0D;
-            // Keep speculative interception out of the continuously displayed
-            // camera rotation. Evaluate it only when an actual shot is queued.
-            return BallisticAimSolver.solve(minecraft.level, player, lockedTarget, context.ballistics(), true,
-                    motionTracker.motionOf(lockedTarget, roundTripTicks));
-        });
+        var playerInfo = player.connection.getPlayerInfo(player.getUUID());
+        double roundTripTicks = playerInfo == null ? 0 : Math.max(0, playerInfo.getLatency()) / 50.0D;
+        // Interception uses actual draw power and motion only at the trigger.
+        TargetMotion motion = context.aimAtEyes() ? motionTracker.motionOf(lockedTarget, roundTripTicks)
+                : TargetMotion.linear(lockedTarget.getDeltaMovement(), lockedTarget.onGround());
+        return BallisticAimSolver.solve(minecraft.level, player, lockedTarget, context.ballistics(), context.aimAtEyes(), motion);
     }
 
     public void clearTarget() {
@@ -129,7 +130,7 @@ public final class AutoAimController {
         if (player != aimingPlayer
                 || aimSolution == null
                 || !isValidTarget(player, lockedTarget)
-                || WeaponBallistics.findAutoAimWeapon(player).isEmpty()) {
+                || WeaponBallistics.findTrackingWeapon(player).isEmpty()) {
             return Optional.empty();
         }
         return Optional.of(aimSolution);
